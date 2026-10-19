@@ -1,0 +1,1297 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>U+tv 홈 화면 프로토타입</title>
+  <style>
+    :root { background:#080808; color-scheme:dark; }
+    * { box-sizing:border-box; }
+    html, body { width:100%; height:100%; margin:0; overflow:hidden; background:#080808; }
+    body { display:grid; place-items:center; font-family:Arial, "Noto Sans KR", sans-serif; }
+    .tv { position:relative; width:min(100vw, calc(100vh * 1.7777778)); aspect-ratio:16 / 9; overflow:hidden; background:#000; outline:none; }
+    .screen { position:absolute; inset:0; display:block; width:100%; height:100%; object-fit:contain; opacity:0; pointer-events:none; user-select:none; -webkit-user-drag:none; }
+    .screen.is-current { opacity:1; }
+    .counter { position:absolute; right:26px; bottom:22px; z-index:2; padding:8px 11px; border-radius:999px; color:#fff; background:rgb(0 0 0 / 65%); font:500 13px/1 Arial, sans-serif; opacity:0; transition:opacity .18s; pointer-events:none; }
+    .tv.show-counter .counter { opacity:1; }
+  </style>
+</head>
+<body>
+  <main class="tv" id="tv" aria-label="U+tv 홈 화면. 방향키 위아래로 화면을 이동합니다." tabindex="0">
+    <div id="screens" aria-live="polite"></div>
+    <output class="counter" id="counter" aria-live="polite"></output>
+  </main>
+  <script>
+    (() => {
+      // 각 이미지는 리모컨 ↓를 한 번 누른 직후의 실제 화면 상태입니다.
+      // 화면 위에 포커스를 다시 그리지 않고, 캡처된 상태를 그대로 전환합니다.
+      const assets = [
+        '1-1_홈화면_메인배너_1.png', '1-2_TV드라마인기_배너_1.png', '1-3_이어보기_1.png',
+        '1-4_영화인기_배너_1.png', '1-5_넷플릭스_배너_1.png', '1-6_화제의신작_배너_1.png',
+        '1-7_TV예능교양_배너_1.png', '1-8_나를위한추천_배너_1.png', '1-9_이번주가격인하_배너_1.png',
+        '1-10_이벤트_배너_1.png', '1-11_어제TV_1.png', '1-12_올해개봉영화_1.png',
+        '1-13_프리미엄클럽_1.png', '1-14_전고객무료_1.png', '1-15_신작보기전_1.png',
+        '1-16_다양한시선_1.png', '1-17_공개예정_1.png', '1-18_오리지널_1.png'
+      ];
+      // 메인 배너의 좌우 이동 상태: _1(기본) → _2 … _8 순서입니다.
+      const heroAssets = [
+        assets[0],
+        '1-1_홈화면_메인배너_2.png', '1-1_홈화면_메인배너_3.png',
+        '1-1_홈화면_메인배너_4.png', '1-1_홈화면_메인배너_5.png',
+        '1-1_홈화면_메인배너_6.png', '1-1_홈화면_메인배너_7.png',
+        '1-1_홈화면_메인배너_8.png'
+      ];
+      const dramaAssets = [
+        assets[1],
+        '1-2_TV드라마인기_배너_2.png', '1-2_TV드라마인기_배너_3.png',
+        '1-2_TV드라마인기_배너_4.png', '1-2_TV드라마인기_배너_5.png',
+        '1-2_TV드라마인기_배너_6.png', '1-2_TV드라마인기_배너_7.png',
+        '1-2_TV드라마인기_배너_8.png', '1-2_TV드라마인기_배너_9.png',
+        '1-2_TV드라마인기_배너_10.png'
+      ];
+      const continueAssets = [
+        assets[2],
+        '1-3_이어보기_2.png', '1-3_이어보기_3.png', '1-3_이어보기_4.png',
+        '1-3_이어보기_5.png', '1-3_이어보기_6.png', '1-3_이어보기_7.png',
+        '1-3_이어보기_8.png', '1-3_이어보기_9.png', '1-3_이어보기_10.png',
+        '1-3_이어보기_11.png'
+      ];
+      const movieAssets = [
+        assets[3],
+        '1-4_영화인기_배너_2.png', '1-4_영화인기_배너_3.png',
+        '1-4_영화인기_배너_4.png', '1-4_영화인기_배너_5.png',
+        '1-4_영화인기_배너_6.png', '1-4_영화인기_배너_7.png',
+        '1-4_영화인기_배너_8.png', '1-4_영화인기_배너_9.png',
+        '1-4_영화인기_배너_10.png'
+      ];
+      const netflixAssets = [
+        assets[4],
+        '1-5_넷플릭스_배너_2.png', '1-5_넷플릭스_배너_3.png', '1-5_넷플릭스_배너_4.png',
+        '1-5_넷플릭스_배너_5.png', '1-5_넷플릭스_배너_6.png', '1-5_넷플릭스_배너_7.png',
+        '1-5_넷플릭스_배너_8.png', '1-5_넷플릭스_배너_9.png', '1-5_넷플릭스_배너_10.png',
+        '1-5_넷플릭스_배너_11.png'
+      ];
+      const newReleaseAssets = [
+        assets[5],
+        '1-6_화제의신작_배너_2.png', '1-6_화제의신작_배너_3.png', '1-6_화제의신작_배너_4.png',
+        '1-6_화제의신작_배너_5.png', '1-6_화제의신작_배너_6.png', '1-6_화제의신작_배너_7.png',
+        '1-6_화제의신작_배너_8.png', '1-6_화제의신작_배너_9.png', '1-6_화제의신작_배너_10.png',
+        '1-6_화제의신작_배너_11.png', '1-6_화제의신작_배너_12.png', '1-6_화제의신작_배너_13.png',
+        '1-6_화제의신작_배너_14.png', '1-6_화제의신작_배너_15.png', '1-6_화제의신작_배너_16.png'
+      ];
+      const entertainmentAssets = [
+        assets[6],
+        '1-7_TV예능교양_배너_2.png', '1-7_TV예능교양_배너_3.png', '1-7_TV예능교양_배너_4.png',
+        '1-7_TV예능교양_배너_5.png', '1-7_TV예능교양_배너_6.png', '1-7_TV예능교양_배너_7.png',
+        '1-7_TV예능교양_배너_8.png', '1-7_TV예능교양_배너_9.png', '1-7_TV예능교양_배너_10.png'
+      ];
+      const recommendationAssets = [
+        assets[7],
+        '1-8_나를위한추천_배너_2.png', '1-8_나를위한추천_배너_3.png', '1-8_나를위한추천_배너_4.png',
+        '1-8_나를위한추천_배너_5.png', '1-8_나를위한추천_배너_6.png', '1-8_나를위한추천_배너_7.png',
+        '1-8_나를위한추천_배너_8.png', '1-8_나를위한추천_배너_9.png', '1-8_나를위한추천_배너_10.png',
+        '1-8_나를위한추천_배너_11.png', '1-8_나를위한추천_배너_12.png', '1-8_나를위한추천_배너_13.png',
+        '1-8_나를위한추천_배너_14.png', '1-8_나를위한추천_배너_15.png', '1-8_나를위한추천_배너_16.png',
+        '1-8_나를위한추천_배너_17.png', '1-8_나를위한추천_배너_18.png', '1-8_나를위한추천_배너_19.png',
+        '1-8_나를위한추천_배너_20.png'
+      ];
+      const priceDropAssets = [
+        assets[8],
+        '1-9_이번주가격인하_배너_2.png', '1-9_이번주가격인하_배너_3.png', '1-9_이번주가격인하_배너_4.png',
+        '1-9_이번주가격인하_배너_5.png', '1-9_이번주가격인하_배너_6.png', '1-9_이번주가격인하_배너_7.png',
+        '1-9_이번주가격인하_배너_8.png', '1-9_이번주가격인하_배너_9.png', '1-9_이번주가격인하_배너_10.png',
+        '1-9_이번주가격인하_배너_11.png', '1-9_이번주가격인하_배너_12.png', '1-9_이번주가격인하_배너_13.png',
+        '1-9_이번주가격인하_배너_14.png', '1-9_이번주가격인하_배너_15.png', '1-9_이번주가격인하_배너_16.png',
+        '1-9_이번주가격인하_배너_17.png', '1-9_이번주가격인하_배너_18.png', '1-9_이번주가격인하_배너_19.png',
+        '1-9_이번주가격인하_배너_20.png', '1-9_이번주가격인하_배너_21.png', '1-9_이번주가격인하_배너_22.png',
+        '1-9_이번주가격인하_배너_23.png', '1-9_이번주가격인하_배너_24.png', '1-9_이번주가격인하_배너_25.png',
+        '1-9_이번주가격인하_배너_26.png', '1-9_이번주가격인하_배너_27.png', '1-9_이번주가격인하_배너_28.png',
+        '1-9_이번주가격인하_배너_29.png', '1-9_이번주가격인하_배너_30.png', '1-9_이번주가격인하_배너_31.png',
+        '1-9_이번주가격인하_배너_32.png', '1-9_이번주가격인하_배너_33.png', '1-9_이번주가격인하_배너_34.png',
+        '1-9_이번주가격인하_배너_35.png', '1-9_이번주가격인하_배너_36.png', '1-9_이번주가격인하_배너_37.png',
+        '1-9_이번주가격인하_배너_38.png', '1-9_이번주가격인하_배너_39.png', '1-9_이번주가격인하_배너_40.png',
+        '1-9_이번주가격인하_배너_41.png', '1-9_이번주가격인하_배너_42.png', '1-9_이번주가격인하_배너_43.png',
+        '1-9_이번주가격인하_배너_44.png', '1-9_이번주가격인하_배너_45.png', '1-9_이번주가격인하_배너_46.png',
+        '1-9_이번주가격인하_배너_47.png', '1-9_이번주가격인하_배너_48.png'
+      ];
+      const eventAssets = [
+        assets[9],
+        '1-10_이벤트_배너_2.png', '1-10_이벤트_배너_3.png', '1-10_이벤트_배너_4.png',
+        '1-10_이벤트_배너_5.png', '1-10_이벤트_배너_6.png', '1-10_이벤트_배너_7.png',
+        '1-10_이벤트_배너_8.png', '1-10_이벤트_배너_9.png', '1-10_이벤트_배너_10.png',
+        '1-10_이벤트_배너_11.png', '1-10_이벤트_배너_12.png', '1-10_이벤트_배너_13.png',
+        '1-10_이벤트_배너_14.png', '1-10_이벤트_배너_15.png', '1-10_이벤트_배너_16.png',
+        '1-10_이벤트_배너_17.png', '1-10_이벤트_배너_18.png', '1-10_이벤트_배너_19.png'
+      ];
+      // 상세 화면은 홈과 별도의 세로 상태 흐름으로 전환합니다.
+      const detailAssets = [
+        '2-1_경주기행_1.png', '2-2_경주기행_예고편_1.png', '2-3_경주기행_예고편_1.png',
+        '2-4_경주기행_인물정보_1.png', '2-5_경주기행_맨위로_1.png'
+      ];
+      const embeddedAssets = {};
+      // Lossless storage: identical binary segments are stored once.
+      embeddedAssets["1-1_홈화면_메인배너_1.png"] = "assets/images/asset_001.jpg";
+embeddedAssets["1-2_TV드라마인기_배너_1.png"] = "assets/images/asset_002.jpg";
+embeddedAssets["1-3_이어보기_1.png"] = "assets/images/asset_003.jpg";
+embeddedAssets["1-4_영화인기_배너_1.png"] = "assets/images/asset_004.jpg";
+embeddedAssets["1-5_넷플릭스_배너_1.png"] = "assets/images/asset_005.jpg";
+embeddedAssets["1-6_화제의신작_배너_1.png"] = "assets/images/asset_006.jpg";
+embeddedAssets["1-7_TV예능교양_배너_1.png"] = "assets/images/asset_007.jpg";
+embeddedAssets["1-8_나를위한추천_배너_1.png"] = "assets/images/asset_008.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_1.png"] = "assets/images/asset_009.jpg";
+embeddedAssets["1-10_이벤트_배너_1.png"] = "assets/images/asset_010.jpg";
+embeddedAssets["1-11_어제TV_1.png"] = "assets/images/asset_011.jpg";
+embeddedAssets["1-12_올해개봉영화_1.png"] = "assets/images/asset_012.jpg";
+embeddedAssets["1-13_프리미엄클럽_1.png"] = "assets/images/asset_013.jpg";
+embeddedAssets["1-14_전고객무료_1.png"] = "assets/images/asset_014.jpg";
+embeddedAssets["1-15_신작보기전_1.png"] = "assets/images/asset_015.jpg";
+embeddedAssets["1-16_다양한시선_1.png"] = "assets/images/asset_016.jpg";
+embeddedAssets["1-17_공개예정_1.png"] = "assets/images/asset_017.jpg";
+embeddedAssets["1-18_오리지널_1.png"] = "assets/images/asset_018.jpg";
+embeddedAssets["1-1_홈화면_메인배너_2.png"] = "assets/images/asset_019.jpg";
+embeddedAssets["1-1_홈화면_메인배너_3.png"] = "assets/images/asset_020.jpg";
+embeddedAssets["1-1_홈화면_메인배너_4.png"] = "assets/images/asset_021.jpg";
+embeddedAssets["1-1_홈화면_메인배너_5.png"] = "assets/images/asset_022.jpg";
+embeddedAssets["1-1_홈화면_메인배너_6.png"] = "assets/images/asset_023.jpg";
+embeddedAssets["1-1_홈화면_메인배너_7.png"] = "assets/images/asset_024.jpg";
+embeddedAssets["1-1_홈화면_메인배너_8.png"] = "assets/images/asset_025.jpg";
+embeddedAssets["1-2_TV드라마인기_배너_2.png"] = "assets/images/asset_026.jpg";
+embeddedAssets["1-2_TV드라마인기_배너_3.png"] = "assets/images/asset_027.jpg";
+embeddedAssets["1-2_TV드라마인기_배너_4.png"] = "assets/images/asset_028.jpg";
+embeddedAssets["1-2_TV드라마인기_배너_5.png"] = "assets/images/asset_029.jpg";
+embeddedAssets["1-2_TV드라마인기_배너_6.png"] = "assets/images/asset_030.jpg";
+embeddedAssets["1-2_TV드라마인기_배너_7.png"] = "assets/images/asset_031.jpg";
+embeddedAssets["1-2_TV드라마인기_배너_8.png"] = "assets/images/asset_032.jpg";
+embeddedAssets["1-2_TV드라마인기_배너_9.png"] = "assets/images/asset_033.jpg";
+embeddedAssets["1-2_TV드라마인기_배너_10.png"] = "assets/images/asset_034.jpg";
+embeddedAssets["1-3_이어보기_2.png"] = "assets/images/asset_035.jpg";
+embeddedAssets["1-3_이어보기_3.png"] = "assets/images/asset_036.jpg";
+embeddedAssets["1-3_이어보기_4.png"] = "assets/images/asset_037.jpg";
+embeddedAssets["1-3_이어보기_5.png"] = "assets/images/asset_038.jpg";
+embeddedAssets["1-3_이어보기_6.png"] = "assets/images/asset_039.jpg";
+embeddedAssets["1-3_이어보기_7.png"] = "assets/images/asset_040.jpg";
+embeddedAssets["1-3_이어보기_8.png"] = "assets/images/asset_041.jpg";
+embeddedAssets["1-3_이어보기_9.png"] = "assets/images/asset_042.jpg";
+embeddedAssets["1-3_이어보기_10.png"] = "assets/images/asset_043.jpg";
+embeddedAssets["1-3_이어보기_11.png"] = "assets/images/asset_044.jpg";
+embeddedAssets["1-4_영화인기_배너_2.png"] = "assets/images/asset_045.jpg";
+embeddedAssets["1-4_영화인기_배너_3.png"] = "assets/images/asset_046.jpg";
+embeddedAssets["1-4_영화인기_배너_4.png"] = "assets/images/asset_047.jpg";
+embeddedAssets["1-4_영화인기_배너_5.png"] = "assets/images/asset_048.jpg";
+embeddedAssets["1-4_영화인기_배너_6.png"] = "assets/images/asset_049.jpg";
+embeddedAssets["1-4_영화인기_배너_7.png"] = "assets/images/asset_050.jpg";
+embeddedAssets["1-4_영화인기_배너_8.png"] = "assets/images/asset_051.jpg";
+embeddedAssets["1-4_영화인기_배너_9.png"] = "assets/images/asset_052.jpg";
+embeddedAssets["1-4_영화인기_배너_10.png"] = "assets/images/asset_053.jpg";
+embeddedAssets["1-5_넷플릭스_배너_2.png"] = "assets/images/asset_054.jpg";
+embeddedAssets["1-5_넷플릭스_배너_3.png"] = "assets/images/asset_055.jpg";
+embeddedAssets["1-5_넷플릭스_배너_4.png"] = "assets/images/asset_056.jpg";
+embeddedAssets["1-5_넷플릭스_배너_5.png"] = "assets/images/asset_057.jpg";
+embeddedAssets["1-5_넷플릭스_배너_6.png"] = "assets/images/asset_058.jpg";
+embeddedAssets["1-5_넷플릭스_배너_7.png"] = "assets/images/asset_059.jpg";
+embeddedAssets["1-5_넷플릭스_배너_8.png"] = "assets/images/asset_060.jpg";
+embeddedAssets["1-5_넷플릭스_배너_9.png"] = "assets/images/asset_061.jpg";
+embeddedAssets["1-5_넷플릭스_배너_10.png"] = "assets/images/asset_062.jpg";
+embeddedAssets["1-5_넷플릭스_배너_11.png"] = "assets/images/asset_063.jpg";
+embeddedAssets["1-6_화제의신작_배너_2.png"] = "assets/images/asset_064.jpg";
+embeddedAssets["1-6_화제의신작_배너_3.png"] = "assets/images/asset_065.jpg";
+embeddedAssets["1-6_화제의신작_배너_4.png"] = "assets/images/asset_066.jpg";
+embeddedAssets["1-6_화제의신작_배너_5.png"] = "assets/images/asset_067.jpg";
+embeddedAssets["1-6_화제의신작_배너_6.png"] = "assets/images/asset_068.jpg";
+embeddedAssets["1-6_화제의신작_배너_7.png"] = "assets/images/asset_069.jpg";
+embeddedAssets["1-6_화제의신작_배너_8.png"] = "assets/images/asset_070.jpg";
+embeddedAssets["1-6_화제의신작_배너_9.png"] = "assets/images/asset_071.jpg";
+embeddedAssets["1-6_화제의신작_배너_10.png"] = "assets/images/asset_072.jpg";
+embeddedAssets["1-6_화제의신작_배너_11.png"] = "assets/images/asset_073.jpg";
+embeddedAssets["1-6_화제의신작_배너_12.png"] = "assets/images/asset_074.jpg";
+embeddedAssets["1-6_화제의신작_배너_13.png"] = "assets/images/asset_075.jpg";
+embeddedAssets["1-6_화제의신작_배너_14.png"] = "assets/images/asset_076.jpg";
+embeddedAssets["1-6_화제의신작_배너_15.png"] = "assets/images/asset_077.jpg";
+embeddedAssets["1-6_화제의신작_배너_16.png"] = "assets/images/asset_078.jpg";
+embeddedAssets["1-7_TV예능교양_배너_2.png"] = "assets/images/asset_079.jpg";
+embeddedAssets["1-7_TV예능교양_배너_3.png"] = "assets/images/asset_080.jpg";
+embeddedAssets["1-7_TV예능교양_배너_4.png"] = "assets/images/asset_081.jpg";
+embeddedAssets["1-7_TV예능교양_배너_5.png"] = "assets/images/asset_082.jpg";
+embeddedAssets["1-7_TV예능교양_배너_6.png"] = "assets/images/asset_083.jpg";
+embeddedAssets["1-7_TV예능교양_배너_7.png"] = "assets/images/asset_084.jpg";
+embeddedAssets["1-7_TV예능교양_배너_8.png"] = "assets/images/asset_085.jpg";
+embeddedAssets["1-7_TV예능교양_배너_9.png"] = "assets/images/asset_086.jpg";
+embeddedAssets["1-7_TV예능교양_배너_10.png"] = "assets/images/asset_087.jpg";
+embeddedAssets["1-8_나를위한추천_배너_2.png"] = "assets/images/asset_088.jpg";
+embeddedAssets["1-8_나를위한추천_배너_3.png"] = "assets/images/asset_089.jpg";
+embeddedAssets["1-8_나를위한추천_배너_4.png"] = "assets/images/asset_090.jpg";
+embeddedAssets["1-8_나를위한추천_배너_5.png"] = "assets/images/asset_091.jpg";
+embeddedAssets["1-8_나를위한추천_배너_6.png"] = "assets/images/asset_092.jpg";
+embeddedAssets["1-8_나를위한추천_배너_7.png"] = "assets/images/asset_093.jpg";
+embeddedAssets["1-8_나를위한추천_배너_8.png"] = "assets/images/asset_094.jpg";
+embeddedAssets["1-8_나를위한추천_배너_9.png"] = "assets/images/asset_095.jpg";
+embeddedAssets["1-8_나를위한추천_배너_10.png"] = "assets/images/asset_096.jpg";
+embeddedAssets["1-8_나를위한추천_배너_11.png"] = "assets/images/asset_097.jpg";
+embeddedAssets["1-8_나를위한추천_배너_12.png"] = "assets/images/asset_098.jpg";
+embeddedAssets["1-8_나를위한추천_배너_13.png"] = "assets/images/asset_099.jpg";
+embeddedAssets["1-8_나를위한추천_배너_14.png"] = "assets/images/asset_100.jpg";
+embeddedAssets["1-8_나를위한추천_배너_15.png"] = "assets/images/asset_101.jpg";
+embeddedAssets["1-8_나를위한추천_배너_16.png"] = "assets/images/asset_102.jpg";
+embeddedAssets["1-8_나를위한추천_배너_17.png"] = "assets/images/asset_103.jpg";
+embeddedAssets["1-8_나를위한추천_배너_18.png"] = "assets/images/asset_104.jpg";
+embeddedAssets["1-8_나를위한추천_배너_19.png"] = "assets/images/asset_105.jpg";
+embeddedAssets["1-8_나를위한추천_배너_20.png"] = "assets/images/asset_106.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_2.png"] = "assets/images/asset_107.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_3.png"] = "assets/images/asset_108.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_4.png"] = "assets/images/asset_109.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_5.png"] = "assets/images/asset_110.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_6.png"] = "assets/images/asset_111.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_7.png"] = "assets/images/asset_112.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_8.png"] = "assets/images/asset_113.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_9.png"] = "assets/images/asset_114.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_10.png"] = "assets/images/asset_115.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_11.png"] = "assets/images/asset_116.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_12.png"] = "assets/images/asset_117.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_13.png"] = "assets/images/asset_118.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_14.png"] = "assets/images/asset_119.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_15.png"] = "assets/images/asset_120.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_16.png"] = "assets/images/asset_121.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_17.png"] = "assets/images/asset_122.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_18.png"] = "assets/images/asset_123.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_19.png"] = "assets/images/asset_124.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_20.png"] = "assets/images/asset_125.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_21.png"] = "assets/images/asset_126.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_22.png"] = "assets/images/asset_127.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_23.png"] = "assets/images/asset_128.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_24.png"] = "assets/images/asset_129.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_25.png"] = "assets/images/asset_130.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_26.png"] = "assets/images/asset_131.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_27.png"] = "assets/images/asset_132.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_28.png"] = "assets/images/asset_133.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_29.png"] = "assets/images/asset_134.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_30.png"] = "assets/images/asset_135.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_31.png"] = "assets/images/asset_136.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_32.png"] = "assets/images/asset_137.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_33.png"] = "assets/images/asset_138.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_34.png"] = "assets/images/asset_139.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_35.png"] = "assets/images/asset_140.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_36.png"] = "assets/images/asset_141.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_37.png"] = "assets/images/asset_142.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_38.png"] = "assets/images/asset_143.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_39.png"] = "assets/images/asset_144.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_40.png"] = "assets/images/asset_145.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_41.png"] = "assets/images/asset_146.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_42.png"] = "assets/images/asset_147.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_43.png"] = "assets/images/asset_148.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_44.png"] = "assets/images/asset_149.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_45.png"] = "assets/images/asset_150.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_46.png"] = "assets/images/asset_151.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_47.png"] = "assets/images/asset_152.jpg";
+embeddedAssets["1-9_이번주가격인하_배너_48.png"] = "assets/images/asset_153.jpg";
+embeddedAssets["1-10_이벤트_배너_2.png"] = "assets/images/asset_154.jpg";
+embeddedAssets["1-10_이벤트_배너_3.png"] = "assets/images/asset_155.jpg";
+embeddedAssets["1-10_이벤트_배너_4.png"] = "assets/images/asset_156.jpg";
+embeddedAssets["1-10_이벤트_배너_5.png"] = "assets/images/asset_157.jpg";
+embeddedAssets["1-10_이벤트_배너_6.png"] = "assets/images/asset_158.jpg";
+embeddedAssets["1-10_이벤트_배너_7.png"] = "assets/images/asset_159.jpg";
+embeddedAssets["1-10_이벤트_배너_8.png"] = "assets/images/asset_160.jpg";
+embeddedAssets["1-10_이벤트_배너_9.png"] = "assets/images/asset_161.jpg";
+embeddedAssets["1-10_이벤트_배너_10.png"] = "assets/images/asset_162.jpg";
+embeddedAssets["1-10_이벤트_배너_11.png"] = "assets/images/asset_163.jpg";
+embeddedAssets["1-10_이벤트_배너_12.png"] = "assets/images/asset_164.jpg";
+embeddedAssets["1-10_이벤트_배너_13.png"] = "assets/images/asset_165.jpg";
+embeddedAssets["1-10_이벤트_배너_14.png"] = "assets/images/asset_166.jpg";
+embeddedAssets["1-10_이벤트_배너_15.png"] = "assets/images/asset_167.jpg";
+embeddedAssets["1-10_이벤트_배너_16.png"] = "assets/images/asset_168.jpg";
+embeddedAssets["1-10_이벤트_배너_17.png"] = "assets/images/asset_169.jpg";
+embeddedAssets["1-10_이벤트_배너_18.png"] = "assets/images/asset_170.jpg";
+embeddedAssets["1-10_이벤트_배너_19.png"] = "assets/images/asset_171.jpg";
+embeddedAssets["2-1_경주기행_1.png"] = "assets/images/asset_172.jpg";
+embeddedAssets["2-2_경주기행_예고편_1.png"] = "assets/images/asset_173.jpg";
+embeddedAssets["2-3_경주기행_예고편_1.png"] = "assets/images/asset_174.jpg";
+embeddedAssets["2-4_경주기행_인물정보_1.png"] = "assets/images/asset_175.jpg";
+embeddedAssets["2-5_경주기행_맨위로_1.png"] = "assets/images/asset_176.jpg";
+      const detailActionAssets = {
+        right: '2-1_경주기행_2.png',
+        favorite: '2-1-1_경주기행_찜하기.png'
+      };
+      embeddedAssets["2-1_경주기행_2.png"] = "assets/images/asset_177.jpg";
+embeddedAssets["2-1-1_경주기행_찜하기.png"] = "assets/images/asset_178.jpg";
+      embeddedAssets["2-1-1-1_경주기행_좋아요.png"] = "assets/images/asset_179.jpg";
+embeddedAssets["2-1-1-2_경주기행_싫어요.png"] = "assets/images/asset_180.jpg";
+      embeddedAssets["2-1-2_경주기행_더보기.png"] = "assets/images/asset_181.jpg";
+embeddedAssets["2-3_경주기행_예고편_2.png"] = "assets/images/asset_182.jpg";
+embeddedAssets["2-3_경주기행_예고편_3.png"] = "assets/images/asset_183.jpg";
+embeddedAssets["2-3_경주기행_예고편_4.png"] = "assets/images/asset_184.jpg";
+embeddedAssets["2-3_경주기행_예고편_5.png"] = "assets/images/asset_185.jpg";
+      embeddedAssets["2-4_경주기행_인물정보_2.png"] = "assets/images/asset_186.jpg";
+embeddedAssets["2-4_경주기행_인물정보_3.png"] = "assets/images/asset_187.jpg";
+embeddedAssets["2-4_경주기행_인물정보_4.png"] = "assets/images/asset_188.jpg";
+embeddedAssets["2-4_경주기행_인물정보_5.png"] = "assets/images/asset_189.jpg";
+embeddedAssets["2-4_경주기행_인물정보_6.png"] = "assets/images/asset_190.jpg";
+embeddedAssets["2-4_경주기행_인물정보_7.png"] = "assets/images/asset_191.jpg";
+      embeddedAssets["3-1_옵세션_1.png"] = "assets/images/asset_192.jpg";
+embeddedAssets["3-2_옵세션_예고편_1.png"] = "assets/images/asset_193.jpg";
+embeddedAssets["3-2_옵세션_예고편_2.png"] = "assets/images/asset_194.jpg";
+embeddedAssets["3-2_옵세션_예고편_3.png"] = "assets/images/asset_195.jpg";
+embeddedAssets["3-3_옵세션_예고편_1.png"] = "assets/images/asset_196.jpg";
+embeddedAssets["3-4_옵세션_인물정보_1.png"] = "assets/images/asset_197.jpg";
+embeddedAssets["3-5_옵세션_함께본콘텐츠_1.png"] = "assets/images/asset_198.jpg";
+embeddedAssets["3-6_옵세션_맨위로_1.png"] = "assets/images/asset_199.jpg";
+      embeddedAssets["3-2_옵세션_예고편_3(1).png"] = "assets/images/asset_195.jpg";
+      embeddedAssets["2-0_홈화면_메인메뉴_마이메뉴.png"] = "assets/images/asset_200.jpg";
+embeddedAssets["2-1_홈화면_메인메뉴_전체.png"] = "assets/images/asset_201.jpg";
+embeddedAssets["2_홈화면_메인메뉴.png"] = "assets/images/asset_202.jpg";
+embeddedAssets["2-2_홈화면_메인메뉴_나의구독.png"] = "assets/images/asset_203.jpg";
+embeddedAssets["2-3_홈화면_메인메뉴_방송패스.png"] = "assets/images/asset_204.jpg";
+embeddedAssets["2-4_홈화면_메인메뉴_유플레이.png"] = "assets/images/asset_205.jpg";
+embeddedAssets["2-5_홈화면_메인메뉴_무료관.png"] = "assets/images/asset_206.jpg";
+embeddedAssets["2-6_홈화면_메인메뉴_설정.png"] = "assets/images/asset_207.jpg";
+embeddedAssets["2-7_홈화면_메인메뉴_고객지원.png"] = "assets/images/asset_208.jpg";
+embeddedAssets["2-8_홈화면_메인메뉴_알림.png"] = "assets/images/asset_209.jpg";
+      embeddedAssets["2-1-1_홈화면_메인메뉴_전체_영화해외드라마.png"] = "assets/images/asset_210.jpg";
+embeddedAssets["2-1-2_홈화면_메인메뉴_전체_TV방송.png"] = "assets/images/asset_211.jpg";
+embeddedAssets["2-1-3_홈화면_메인메뉴_전체_애니메이션.png"] = "assets/images/asset_212.jpg";
+embeddedAssets["2-1-4_홈화면_메인메뉴_전체_다큐교양.png"] = "assets/images/asset_213.jpg";
+embeddedAssets["2-1-5_홈화면_메인메뉴_전체_프리미엄클럽무료.png"] = "assets/images/asset_214.jpg";
+embeddedAssets["2-1-6_홈화면_메인메뉴_전체_아이들나라.png"] = "assets/images/asset_215.jpg";
+      embeddedAssets["9-1_오늘의추천_1.png"] = "assets/images/asset_216.png";
+      embeddedAssets["9-1_오늘의추천_2.png"] = "assets/images/asset_217.png";
+      embeddedAssets["9-1_오늘의추천_3.png"] = "assets/images/asset_218.png";
+      embeddedAssets["9-1_오늘의추천_4.png"] = "assets/images/asset_219.png";
+      embeddedAssets["9-1_오늘의추천_5.png"] = "assets/images/asset_220.png";
+      embeddedAssets["9-1_오늘의추천_6.png"] = "assets/images/asset_221.png";
+      embeddedAssets["9-1_오늘의추천_7.png"] = "assets/images/asset_222.png";
+      embeddedAssets["9-1_오늘의추천_8.png"] = "assets/images/asset_223.png";
+      embeddedAssets["9-1_오늘의추천_9.png"] = "assets/images/asset_224.png";
+      embeddedAssets["9-1_오늘의추천_10.png"] = "assets/images/asset_225.png";
+      const tv = document.getElementById('tv');
+      const screens = document.getElementById('screens');
+      const counter = document.getElementById('counter');
+      let current = 0;
+      let horizontalCurrent = 0;
+      let counterTimer;
+      let shown;
+      function createScreen(asset, initial = false) {
+        const image = new Image();
+        image.className = `screen${initial ? ' is-current' : ''}`;
+        image.src = embeddedAssets[asset];
+        image.alt = 'U+tv 홈 화면';
+        screens.append(image);
+        return image;
+      }
+      const images = assets.map((asset, index) => createScreen(asset, index === 0));
+      const heroImages = [images[0], ...heroAssets.slice(1).map(asset => createScreen(asset))];
+      const dramaImages = [images[1], ...dramaAssets.slice(1).map(asset => createScreen(asset))];
+      const continueImages = [images[2], ...continueAssets.slice(1).map(asset => createScreen(asset))];
+      const movieImages = [images[3], ...movieAssets.slice(1).map(asset => createScreen(asset))];
+      const netflixImages = [images[4], ...netflixAssets.slice(1).map(asset => createScreen(asset))];
+      const newReleaseImages = [images[5], ...newReleaseAssets.slice(1).map(asset => createScreen(asset))];
+      const entertainmentImages = [images[6], ...entertainmentAssets.slice(1).map(asset => createScreen(asset))];
+      const recommendationImages = [images[7], ...recommendationAssets.slice(1).map(asset => createScreen(asset))];
+      const priceDropImages = [images[8], ...priceDropAssets.slice(1).map(asset => createScreen(asset))];
+      const eventImages = [images[9], ...eventAssets.slice(1).map(asset => createScreen(asset))];
+      const detailImages = detailAssets.map(asset => createScreen(asset));
+      const detailRightImage = createScreen(detailActionAssets.right);
+      const detailFavoriteImage = createScreen(detailActionAssets.favorite);
+      const favoriteImages = [
+        detailFavoriteImage,
+        createScreen('2-1-1-1_경주기행_좋아요.png'),
+        createScreen('2-1-1-2_경주기행_싫어요.png')
+      ];
+      const detailMoreImage = createScreen('2-1-2_경주기행_더보기.png');
+      const previewImages = [
+        detailImages[2],
+        createScreen('2-3_경주기행_예고편_2.png'),
+        createScreen('2-3_경주기행_예고편_3.png'),
+        createScreen('2-3_경주기행_예고편_4.png'),
+        createScreen('2-3_경주기행_예고편_5.png')
+      ];
+      const personImages = [
+        detailImages[3],
+        createScreen('2-4_경주기행_인물정보_2.png'),
+        createScreen('2-4_경주기행_인물정보_3.png'),
+        createScreen('2-4_경주기행_인물정보_4.png'),
+        createScreen('2-4_경주기행_인물정보_5.png'),
+        createScreen('2-4_경주기행_인물정보_6.png'),
+        createScreen('2-4_경주기행_인물정보_7.png')
+      ];
+      const obsessionAssets = [
+        '3-1_옵세션_1.png', '3-2_옵세션_예고편_1.png', '3-3_옵세션_예고편_1.png',
+        '3-4_옵세션_인물정보_1.png', '3-5_옵세션_함께본콘텐츠_1.png', '3-6_옵세션_맨위로_1.png'
+      ];
+      const obsessionImages = obsessionAssets.map(asset => createScreen(asset));
+      const obsessionPreviewImages = [
+        obsessionImages[1],
+        createScreen('3-2_옵세션_예고편_2.png'),
+        createScreen('3-2_옵세션_예고편_3(1).png')
+      ];
+      const snbAssets = [
+        '2-0_홈화면_메인메뉴_마이메뉴.png', '2-1_홈화면_메인메뉴_전체.png', '2_홈화면_메인메뉴.png',
+        '2-2_홈화면_메인메뉴_나의구독.png', '2-3_홈화면_메인메뉴_방송패스.png',
+        '2-4_홈화면_메인메뉴_유플레이.png', '2-5_홈화면_메인메뉴_무료관.png',
+        '2-6_홈화면_메인메뉴_설정.png', '2-7_홈화면_메인메뉴_고객지원.png',
+        '2-8_홈화면_메인메뉴_알림.png'
+      ];
+      const snbImages = snbAssets.map(asset => createScreen(asset));
+      const allMenuImages = [
+        createScreen('2-1-1_홈화면_메인메뉴_전체_영화해외드라마.png'),
+        createScreen('2-1-2_홈화면_메인메뉴_전체_TV방송.png'),
+        createScreen('2-1-3_홈화면_메인메뉴_전체_애니메이션.png'),
+        createScreen('2-1-4_홈화면_메인메뉴_전체_다큐교양.png'),
+        createScreen('2-1-5_홈화면_메인메뉴_전체_프리미엄클럽무료.png'),
+        createScreen('2-1-6_홈화면_메인메뉴_전체_아이들나라.png')
+      ];
+      embeddedAssets["2-1-1-1_홈화면_메인메뉴_전체_영화해외드라마_영화해외드라마홈.png"] = "assets/images/asset_226.png";
+embeddedAssets["2-1-1-2_홈화면_메인메뉴_전체_영화해외드라마_최신영화.png"] = "assets/images/asset_227.png";
+embeddedAssets["2-1-1-3_홈화면_메인메뉴_전체_영화해외드라마_이번주인기영화.png"] = "assets/images/asset_228.png";
+embeddedAssets["2-1-1-4_홈화면_메인메뉴_전체_영화해외드라마_한가위무료영화.png"] = "assets/images/asset_229.png";
+embeddedAssets["2-1-1-5_홈화면_메인메뉴_전체_영화해외드라마_추석영화할인.png"] = "assets/images/asset_230.png";
+embeddedAssets["2-1-1-6_홈화면_메인메뉴_전체_영화해외드라마_이번주가격인하.png"] = "assets/images/asset_231.png";
+embeddedAssets["2-1-1-7_홈화면_메인메뉴_전체_영화해외드라마_독립예술영화관.png"] = "assets/images/asset_232.png";
+embeddedAssets["2-1-1-8_홈화면_메인메뉴_전체_영화해외드라마_유플레이.png"] = "assets/images/asset_233.png";
+embeddedAssets["2-1-1-9_홈화면_메인메뉴_전체_영화해외드라마_프리미엄클럽무료.png"] = "assets/images/asset_234.png";
+embeddedAssets["2-1-1-10_홈화면_메인메뉴_전체_영화해외드라마_Utv전고객무료.png"] = "assets/images/asset_235.png";
+embeddedAssets["2-1-1-11_홈화면_메인메뉴_전체_영화해외드라마_해외드라마.png"] = "assets/images/asset_236.png";
+embeddedAssets["2-1-1-12_홈화면_메인메뉴_전체_영화해외드라마_성인.png"] = "assets/images/asset_237.png";
+      const movieDramaMenuAssets = [
+        '2-1-1-1_홈화면_메인메뉴_전체_영화해외드라마_영화해외드라마홈.png',
+        '2-1-1-2_홈화면_메인메뉴_전체_영화해외드라마_최신영화.png',
+        '2-1-1-3_홈화면_메인메뉴_전체_영화해외드라마_이번주인기영화.png',
+        '2-1-1-4_홈화면_메인메뉴_전체_영화해외드라마_한가위무료영화.png',
+        '2-1-1-5_홈화면_메인메뉴_전체_영화해외드라마_추석영화할인.png',
+        '2-1-1-6_홈화면_메인메뉴_전체_영화해외드라마_이번주가격인하.png',
+        '2-1-1-7_홈화면_메인메뉴_전체_영화해외드라마_독립예술영화관.png',
+        '2-1-1-8_홈화면_메인메뉴_전체_영화해외드라마_유플레이.png',
+        '2-1-1-9_홈화면_메인메뉴_전체_영화해외드라마_프리미엄클럽무료.png',
+        '2-1-1-10_홈화면_메인메뉴_전체_영화해외드라마_Utv전고객무료.png',
+        '2-1-1-11_홈화면_메인메뉴_전체_영화해외드라마_해외드라마.png',
+        '2-1-1-12_홈화면_메인메뉴_전체_영화해외드라마_성인.png'
+      ];
+      const movieDramaMenuImages = movieDramaMenuAssets.map(asset => createScreen(asset));
+      embeddedAssets["2-2-1_홈화면_메인메뉴_나의구독_상세.png"] = "assets/images/asset_238.png";
+embeddedAssets["2-3-1_홈화면_메인메뉴_방송패스_상세.png"] = "assets/images/asset_239.png";
+embeddedAssets["2-4-1_홈화면_메인메뉴_유플레이_상세.png"] = "assets/images/asset_240.png";
+embeddedAssets["2-5-1_홈화면_메인메뉴_무료관_상세.png"] = "assets/images/asset_241.png";
+      const snbDetailAssets = [
+        '2-2-1_홈화면_메인메뉴_나의구독_상세.png',
+        '2-3-1_홈화면_메인메뉴_방송패스_상세.png',
+        '2-4-1_홈화면_메인메뉴_유플레이_상세.png',
+        '2-5-1_홈화면_메인메뉴_무료관_상세.png'
+      ];
+      const snbDetailImages = snbDetailAssets.map(asset => createScreen(asset));
+      embeddedAssets["4-0-3_오케이마담_시리즈선택_1(1).png"] = "assets/images/asset_242.png";
+embeddedAssets["4-1-2_오케이마담_더보기(1).png"] = "assets/images/asset_243.png";
+embeddedAssets["4-2-1_오케이마담_찜하기(1).png"] = "assets/images/asset_244.png";
+embeddedAssets["4-3_오케이마담_1(1).png"] = "assets/images/asset_245.png";
+embeddedAssets["4-3_오케이마담_2(1).png"] = "assets/images/asset_246.png";
+embeddedAssets["4-4_오케이마담_예고편_1(1).png"] = "assets/images/asset_247.png";
+embeddedAssets["4-5_오케이마담_예고편_1(1).png"] = "assets/images/asset_248.png";
+embeddedAssets["4-6_오케이마담_인물정보_1(1).png"] = "assets/images/asset_249.png";
+embeddedAssets["4-7_오케이마담_평점_1(1).png"] = "assets/images/asset_250.png";
+embeddedAssets["4-8_오케이마담_함께본콘텐츠_1(2).png"] = "assets/images/asset_251.png";
+embeddedAssets["4-9_오케이마담_맨위로_1(2).png"] = "assets/images/asset_252.png";
+      const okayMadamRows = [
+        [createScreen('4-0-3_오케이마담_시리즈선택_1(1).png')],
+        [createScreen('4-1-2_오케이마담_더보기(1).png')],
+        [createScreen('4-2-1_오케이마담_찜하기(1).png')],
+        [createScreen('4-3_오케이마담_1(1).png'), createScreen('4-3_오케이마담_2(1).png')],
+        [createScreen('4-4_오케이마담_예고편_1(1).png')],
+        [createScreen('4-5_오케이마담_예고편_1(1).png')],
+        [createScreen('4-6_오케이마담_인물정보_1(1).png')],
+        [createScreen('4-7_오케이마담_평점_1(1).png')],
+        [createScreen('4-8_오케이마담_함께본콘텐츠_1(2).png')],
+        [createScreen('4-9_오케이마담_맨위로_1(2).png')]
+      ];
+      embeddedAssets["5-1_대환장기안장.png"] = "assets/images/asset_253.png";
+      const kianImage = createScreen('5-1_대환장기안장.png');
+      embeddedAssets["4-0-3-1_오케이마담_시리즈선택_1.png"] = "assets/images/asset_254.png";
+embeddedAssets["4-0-3-1_오케이마담_시리즈선택_2.png"] = "assets/images/asset_255.png";
+      const okayMadamSeriesImages = [createScreen('4-0-3-1_오케이마담_시리즈선택_1.png'), createScreen('4-0-3-1_오케이마담_시리즈선택_2.png')];
+      embeddedAssets["6-0_스파이더맨_더보기_1.png"] = "assets/images/asset_256.png";
+embeddedAssets["6-1_스파이더맨_1.png"] = "assets/images/asset_257.png";
+embeddedAssets["6-1-1_스파이더맨_찜하기_1.png"] = "assets/images/asset_258.png";
+embeddedAssets["6-1-1_스파이더맨_좋아요_2.png"] = "assets/images/asset_259.png";
+embeddedAssets["6-1-1_스파이더맨_싫어요_3.png"] = "assets/images/asset_260.png";
+embeddedAssets["6-2_스파이더맨_포함된콘텐츠_1.png"] = "assets/images/asset_261.png";
+embeddedAssets["6-2_스파이더맨_포함된콘텐츠_2.png"] = "assets/images/asset_262.png";
+embeddedAssets["6-2_스파이더맨_포함된콘텐츠_3.png"] = "assets/images/asset_263.png";
+embeddedAssets["6-2_스파이더맨_포함된콘텐츠_4.png"] = "assets/images/asset_264.png";
+embeddedAssets["6-3_스파이더맨_예고편_1.png"] = "assets/images/asset_265.png";
+embeddedAssets["6-3_스파이더맨_인물정보_2.png"] = "assets/images/asset_266.png";
+embeddedAssets["6-4_스파이더맨_예고편_1.png"] = "assets/images/asset_267.png";
+embeddedAssets["6-4_스파이더맨_예고편_2.png"] = "assets/images/asset_268.png";
+embeddedAssets["6-4_스파이더맨_예고편_3.png"] = "assets/images/asset_269.png";
+embeddedAssets["6-4_스파이더맨_예고편_4.png"] = "assets/images/asset_270.png";
+embeddedAssets["6-5_스파이더맨_인물정보_1.png"] = "assets/images/asset_271.png";
+embeddedAssets["6-5_스파이더맨_인물정보_2.png"] = "assets/images/asset_272.png";
+embeddedAssets["6-5_스파이더맨_인물정보_3.png"] = "assets/images/asset_273.png";
+embeddedAssets["6-5_스파이더맨_인물정보_4.png"] = "assets/images/asset_274.png";
+embeddedAssets["6-5_스파이더맨_인물정보_5.png"] = "assets/images/asset_275.png";
+embeddedAssets["6-5_스파이더맨_인물정보_6.png"] = "assets/images/asset_276.png";
+embeddedAssets["6-5_스파이더맨_인물정보_7.png"] = "assets/images/asset_277.png";
+embeddedAssets["6-5_스파이더맨_인물정보_8.png"] = "assets/images/asset_278.png";
+embeddedAssets["6-6_스파이더맨_맨위로_1.png"] = "assets/images/asset_279.png";
+      const spiderManRows = [
+        [createScreen('6-0_스파이더맨_더보기_1.png')],
+        [createScreen('6-1_스파이더맨_1.png'), createScreen('6-1-1_스파이더맨_찜하기_1.png'), createScreen('6-1-1_스파이더맨_좋아요_2.png'), createScreen('6-1-1_스파이더맨_싫어요_3.png')],
+        [createScreen('6-2_스파이더맨_포함된콘텐츠_1.png'), createScreen('6-2_스파이더맨_포함된콘텐츠_2.png'), createScreen('6-2_스파이더맨_포함된콘텐츠_3.png'), createScreen('6-2_스파이더맨_포함된콘텐츠_4.png')],
+        [createScreen('6-3_스파이더맨_예고편_1.png'), createScreen('6-3_스파이더맨_인물정보_2.png')],
+        [createScreen('6-4_스파이더맨_예고편_1.png'), createScreen('6-4_스파이더맨_예고편_2.png'), createScreen('6-4_스파이더맨_예고편_3.png'), createScreen('6-4_스파이더맨_예고편_4.png')],
+        [createScreen('6-5_스파이더맨_인물정보_1.png'), createScreen('6-5_스파이더맨_인물정보_2.png'), createScreen('6-5_스파이더맨_인물정보_3.png'), createScreen('6-5_스파이더맨_인물정보_4.png'), createScreen('6-5_스파이더맨_인물정보_5.png'), createScreen('6-5_스파이더맨_인물정보_6.png'), createScreen('6-5_스파이더맨_인물정보_7.png'), createScreen('6-5_스파이더맨_인물정보_8.png')],
+        [createScreen('6-6_스파이더맨_맨위로_1.png')]
+      ];
+      embeddedAssets["7-1_비광_상세_1.png"] = "assets/images/asset_280.png";
+embeddedAssets["7-1_비광_상세_2.png"] = "assets/images/asset_281.png";
+embeddedAssets["7-2_비광_예고편_1.png"] = "assets/images/asset_282.png";
+embeddedAssets["7-2_비광_인물_2.png"] = "assets/images/asset_283.png";
+embeddedAssets["7-2_비광_함께콘텐츠_3.png"] = "assets/images/asset_284.png";
+embeddedAssets["7-3_비광_에고편_1.png"] = "assets/images/asset_285.png";
+embeddedAssets["7-4_비광_인물_1.png"] = "assets/images/asset_286.png";
+embeddedAssets["7-5_비광_함께콘텐츠_1.png"] = "assets/images/asset_287.png";
+embeddedAssets["7-6_비광_맨위로_1.png"] = "assets/images/asset_288.png";
+      const bikwangRows = [
+        [createScreen('7-1_비광_상세_1.png'), createScreen('7-1_비광_상세_2.png')],
+        [createScreen('7-2_비광_예고편_1.png'), createScreen('7-2_비광_인물_2.png'), createScreen('7-2_비광_함께콘텐츠_3.png')],
+        [createScreen('7-3_비광_에고편_1.png')],
+        [createScreen('7-4_비광_인물_1.png')],
+        [createScreen('7-5_비광_함께콘텐츠_1.png')],
+        [createScreen('7-6_비광_맨위로_1.png')]
+      ];
+      embeddedAssets["8-1_오크_상세_1.png"] = "assets/images/asset_289.png";
+embeddedAssets["8-1_오크_상세_2.png"] = "assets/images/asset_290.png";
+embeddedAssets["8-2_오크_예고편_1.png"] = "assets/images/asset_291.png";
+embeddedAssets["8-2_오크_인물_2.png"] = "assets/images/asset_292.png";
+embeddedAssets["8-2_오크_평점_3.png"] = "assets/images/asset_293.png";
+embeddedAssets["8-2_오크_함께콘텐츠_4.png"] = "assets/images/asset_294.png";
+embeddedAssets["8-3_오크_예고편_1.png"] = "assets/images/asset_295.png";
+embeddedAssets["8-4_오크_인물_1.png"] = "assets/images/asset_296.png";
+embeddedAssets["8-5_오크_평점_1.png"] = "assets/images/asset_297.png";
+embeddedAssets["8-6_오크_함께콘텐츠_1.png"] = "assets/images/asset_298.png";
+embeddedAssets["8-7_오크_맨위로_1.png"] = "assets/images/asset_299.png";
+      const oakRows = [
+        [createScreen('8-1_오크_상세_1.png'), createScreen('8-1_오크_상세_2.png')],
+        [createScreen('8-2_오크_예고편_1.png'), createScreen('8-2_오크_인물_2.png'), createScreen('8-2_오크_평점_3.png'), createScreen('8-2_오크_함께콘텐츠_4.png')],
+        [createScreen('8-3_오크_예고편_1.png')],
+        [createScreen('8-4_오크_인물_1.png')],
+        [createScreen('8-5_오크_평점_1.png')],
+        [createScreen('8-6_오크_함께콘텐츠_1.png')],
+        [createScreen('8-7_오크_맨위로_1.png')]
+      ];
+      const todayRecommendationImages = [
+        createScreen("9-1_오늘의추천_1.png"),
+        createScreen("9-1_오늘의추천_2.png"),
+        createScreen("9-1_오늘의추천_3.png"),
+        createScreen("9-1_오늘의추천_4.png"),
+        createScreen("9-1_오늘의추천_5.png"),
+        createScreen("9-1_오늘의추천_6.png"),
+        createScreen("9-1_오늘의추천_7.png"),
+        createScreen("9-1_오늘의추천_8.png"),
+        createScreen("9-1_오늘의추천_9.png"),
+        createScreen("9-1_오늘의추천_10.png")
+      ];
+      const horizontalImages = { 0: heroImages, 1: dramaImages, 2: continueImages, 3: movieImages, 4: netflixImages, 5: newReleaseImages, 6: entertainmentImages, 7: recommendationImages, 8: priceDropImages, 9: eventImages };
+      shown = images[0];
+      let view = 'home';
+      let detailCurrent = 0;
+      let detailBranch = 'base';
+      let favoriteCurrent = 0;
+      let moreActive = false;
+      let previewCurrent = 0;
+      let personCurrent = 0;
+      let obsessionCurrent = 0;
+      let obsessionPreviewCurrent = 0;
+      let snbCurrent = 2;
+      let snbDepth = 'one';
+      let allMenuCurrent = 0;
+      let movieDramaMenuCurrent = 0;
+      let snbDetailCurrent = 0;
+      let okayMadamRow = 3;
+      let okayMadamColumn = 0;
+      let okayMadamSeriesCurrent = 0;
+      let spiderManRow = 1;
+      let spiderManColumn = 0;
+      let bikwangRow = 0;
+      let bikwangColumn = 0;
+      let oakRow = 0;
+      let oakColumn = 0;
+      let todayRecommendationCurrent = 0;
+      function show(image) {
+        if (shown === image) return;
+        shown.classList.remove('is-current');
+        image.classList.add('is-current');
+        shown = image;
+      }
+      function announce() {
+        counter.value = view === 'detail'
+          ? `${detailCurrent + 1} / ${detailImages.length}`
+          : view === 'obsession'
+            ? `${obsessionCurrent + 1} / ${obsessionImages.length}`
+            : view === 'okayMadam'
+              ? `${okayMadamRow + 1} / ${okayMadamRows.length}`
+              : view === 'kian'
+                ? `1 / 1`
+                : view === 'okayMadamSeries'
+                  ? `${okayMadamSeriesCurrent + 1} / ${okayMadamSeriesImages.length}`
+                  : view === 'spiderMan'
+                    ? `${spiderManRow + 1} / ${spiderManRows.length}`
+                    : view === 'bikwang'
+                      ? `${bikwangRow + 1} / ${bikwangRows.length}`
+                      : view === 'todayRecommendation'
+                        ? `${todayRecommendationCurrent + 1} / ${todayRecommendationImages.length}`
+                        : view === 'oak'
+                          ? `${oakRow + 1} / ${oakRows.length}`
+                        : view === 'snb'
+              ? snbDepth === 'all'
+                ? `${allMenuCurrent + 1} / ${allMenuImages.length}`
+                : snbDepth === 'movieDrama'
+                  ? `${movieDramaMenuCurrent + 1} / ${movieDramaMenuImages.length}`
+                  : snbDepth === 'detail'
+                    ? `1 / 1`
+                    : `${snbCurrent + 1} / ${snbImages.length}`
+              : `${current + 1} / ${images.length}`;
+        tv.classList.add('show-counter');
+        clearTimeout(counterTimer);
+        counterTimer = setTimeout(() => tv.classList.remove('show-counter'), 700);
+      }
+      function move(direction) {
+        const next = Math.max(0, Math.min(images.length - 1, current + direction));
+        if (next === current) return;
+        // 인접 지면에 같은 가로 순번의 캡처가 있으면 그 상태를 유지합니다.
+        // 예: 메인 _4 ↓ → TV 드라마 인기 _4
+        const nextStates = horizontalImages[next];
+        horizontalCurrent = nextStates ? Math.min(horizontalCurrent, nextStates.length - 1) : 0;
+        show(nextStates ? nextStates[horizontalCurrent] : images[next]);
+        current = next;
+        announce();
+      }
+      function moveHero(direction) {
+        const states = horizontalImages[current];
+        if (!states) return;
+        const next = Math.max(0, Math.min(states.length - 1, horizontalCurrent + direction));
+        if (next === horizontalCurrent) return;
+        horizontalCurrent = next;
+        show(states[horizontalCurrent]);
+      }
+      function enterDetail() {
+        view = 'detail';
+        detailCurrent = 0;
+        detailBranch = 'base';
+        favoriteCurrent = 0;
+        moreActive = false;
+        previewCurrent = 0;
+        personCurrent = 0;
+        show(detailImages[detailCurrent]);
+        announce();
+      }
+      function moveDetail(direction) {
+        const next = Math.max(0, Math.min(detailImages.length - 1, detailCurrent + direction));
+        if (next === detailCurrent) return;
+        detailCurrent = next;
+        detailBranch = 'base';
+        moreActive = false;
+        previewCurrent = 0;
+        personCurrent = 0;
+        show(detailImages[detailCurrent]);
+        announce();
+      }
+      function showDetailBranch(branch) {
+        detailBranch = branch;
+        show(branch === 'right' ? detailRightImage : detailFavoriteImage);
+        announce();
+      }
+      function returnToDetailBase() {
+        detailBranch = 'base';
+        favoriteCurrent = 0;
+        show(detailImages[detailCurrent]);
+        announce();
+      }
+      function moveFavorite(direction) {
+        const next = Math.max(0, Math.min(favoriteImages.length - 1, favoriteCurrent + direction));
+        if (next === favoriteCurrent) return;
+        favoriteCurrent = next;
+        show(favoriteImages[favoriteCurrent]);
+        announce();
+      }
+      function showMore() {
+        moreActive = true;
+        show(detailMoreImage);
+        announce();
+      }
+      function returnToFavoriteBase() {
+        moreActive = false;
+        favoriteCurrent = 0;
+        show(favoriteImages[favoriteCurrent]);
+        announce();
+      }
+      function movePreview(direction) {
+        const next = Math.max(0, Math.min(previewImages.length - 1, previewCurrent + direction));
+        if (next === previewCurrent) return;
+        previewCurrent = next;
+        show(previewImages[previewCurrent]);
+        announce();
+      }
+      function movePerson(direction) {
+        const next = Math.max(0, Math.min(personImages.length - 1, personCurrent + direction));
+        if (next === personCurrent) return;
+        personCurrent = next;
+        show(personImages[personCurrent]);
+        announce();
+      }
+      function enterObsession() {
+        view = 'obsession';
+        obsessionCurrent = 0;
+        obsessionPreviewCurrent = 0;
+        show(obsessionImages[obsessionCurrent]);
+        announce();
+      }
+      function moveObsession(direction) {
+        const next = Math.max(0, Math.min(obsessionImages.length - 1, obsessionCurrent + direction));
+        if (next === obsessionCurrent) return;
+        obsessionCurrent = next;
+        obsessionPreviewCurrent = 0;
+        show(obsessionImages[obsessionCurrent]);
+        announce();
+      }
+      function moveObsessionPreview(direction) {
+        const next = Math.max(0, Math.min(obsessionPreviewImages.length - 1, obsessionPreviewCurrent + direction));
+        if (next === obsessionPreviewCurrent) return;
+        obsessionPreviewCurrent = next;
+        show(obsessionPreviewImages[obsessionPreviewCurrent]);
+        announce();
+      }
+      function enterOkayMadam() {
+        view = 'okayMadam';
+        okayMadamRow = 3;
+        okayMadamColumn = 0;
+        show(okayMadamRows[okayMadamRow][okayMadamColumn]);
+        announce();
+      }
+      function moveOkayMadamVertical(direction) {
+        const next = Math.max(0, Math.min(okayMadamRows.length - 1, okayMadamRow + direction));
+        if (next === okayMadamRow) return;
+        okayMadamRow = next;
+        okayMadamColumn = 0;
+        show(okayMadamRows[okayMadamRow][okayMadamColumn]);
+        announce();
+      }
+      function moveOkayMadamHorizontal(direction) {
+        const row = okayMadamRows[okayMadamRow];
+        const next = Math.max(0, Math.min(row.length - 1, okayMadamColumn + direction));
+        if (next === okayMadamColumn) return;
+        okayMadamColumn = next;
+        show(row[okayMadamColumn]);
+        announce();
+      }
+      function returnHomeToOkayMadamBanner() {
+        view = 'home';
+        current = 0;
+        horizontalCurrent = 2;
+        show(heroImages[horizontalCurrent]);
+        announce();
+      }
+      function returnToOkayMadamMain() {
+        okayMadamRow = 3;
+        okayMadamColumn = 0;
+        show(okayMadamRows[okayMadamRow][okayMadamColumn]);
+        announce();
+      }
+      function enterKian() {
+        view = 'kian';
+        show(kianImage);
+        announce();
+      }
+      function enterOkayMadamSeries() {
+        view = 'okayMadamSeries';
+        okayMadamSeriesCurrent = 0;
+        show(okayMadamSeriesImages[okayMadamSeriesCurrent]);
+        announce();
+      }
+      function moveOkayMadamSeries(direction) {
+        const next = Math.max(0, Math.min(okayMadamSeriesImages.length - 1, okayMadamSeriesCurrent + direction));
+        if (next === okayMadamSeriesCurrent) return;
+        okayMadamSeriesCurrent = next;
+        show(okayMadamSeriesImages[okayMadamSeriesCurrent]);
+        announce();
+      }
+      function returnToOkayMadamSeriesBase() {
+        view = 'okayMadam';
+        okayMadamRow = 0;
+        okayMadamColumn = 0;
+        show(okayMadamRows[okayMadamRow][okayMadamColumn]);
+        announce();
+      }
+      function enterSpiderMan() {
+        view = 'spiderMan';
+        spiderManRow = 1;
+        spiderManColumn = 0;
+        show(spiderManRows[spiderManRow][spiderManColumn]);
+        announce();
+      }
+      function moveSpiderManVertical(direction) {
+        const next = Math.max(0, Math.min(spiderManRows.length - 1, spiderManRow + direction));
+        if (next === spiderManRow) return;
+        spiderManRow = next;
+        spiderManColumn = 0;
+        show(spiderManRows[spiderManRow][spiderManColumn]);
+        announce();
+      }
+      function moveSpiderManHorizontal(direction) {
+        const row = spiderManRows[spiderManRow];
+        const next = Math.max(0, Math.min(row.length - 1, spiderManColumn + direction));
+        if (next === spiderManColumn) return;
+        spiderManColumn = next;
+        show(row[spiderManColumn]);
+        announce();
+      }
+      function returnHomeToSpiderManBanner() {
+        view = 'home';
+        current = 0;
+        horizontalCurrent = 4;
+        show(heroImages[horizontalCurrent]);
+        announce();
+      }
+      function returnToSpiderManMain() {
+        spiderManRow = 1;
+        spiderManColumn = 0;
+        show(spiderManRows[spiderManRow][spiderManColumn]);
+        announce();
+      }
+      function enterBikwang() {
+        view = 'bikwang';
+        bikwangRow = 0;
+        bikwangColumn = 0;
+        show(bikwangRows[bikwangRow][bikwangColumn]);
+        announce();
+      }
+      function moveBikwangVertical(direction) {
+        const next = Math.max(0, Math.min(bikwangRows.length - 1, bikwangRow + direction));
+        if (next === bikwangRow) return;
+        bikwangRow = next;
+        bikwangColumn = 0;
+        show(bikwangRows[bikwangRow][bikwangColumn]);
+        announce();
+      }
+      function moveBikwangHorizontal(direction) {
+        const row = bikwangRows[bikwangRow];
+        const next = Math.max(0, Math.min(row.length - 1, bikwangColumn + direction));
+        if (next === bikwangColumn) return;
+        bikwangColumn = next;
+        show(row[bikwangColumn]);
+        announce();
+      }
+      function returnHomeToBikwangBanner() {
+        view = 'home';
+        current = 0;
+        horizontalCurrent = 5;
+        show(heroImages[horizontalCurrent]);
+        announce();
+      }
+      function returnToBikwangMain() {
+        bikwangRow = 0;
+        bikwangColumn = 0;
+        show(bikwangRows[bikwangRow][bikwangColumn]);
+        announce();
+      }
+      function enterTodayRecommendation() {
+        view = 'todayRecommendation';
+        todayRecommendationCurrent = 0;
+        show(todayRecommendationImages[todayRecommendationCurrent]);
+        announce();
+      }
+      function moveTodayRecommendation(direction) {
+        const length = todayRecommendationImages.length;
+        todayRecommendationCurrent = (todayRecommendationCurrent + direction + length) % length;
+        show(todayRecommendationImages[todayRecommendationCurrent]);
+        announce();
+      }
+      function returnHomeToTodayRecommendationBanner() {
+        view = 'home';
+        current = 0;
+        horizontalCurrent = 7;
+        show(heroImages[horizontalCurrent]);
+        announce();
+      }
+      function enterOak() {
+        view = 'oak';
+        oakRow = 0;
+        oakColumn = 0;
+        show(oakRows[oakRow][oakColumn]);
+        announce();
+      }
+      function moveOakVertical(direction) {
+        const next = Math.max(0, Math.min(oakRows.length - 1, oakRow + direction));
+        if (next === oakRow) return;
+        oakRow = next;
+        oakColumn = 0;
+        show(oakRows[oakRow][oakColumn]);
+        announce();
+      }
+      function moveOakHorizontal(direction) {
+        const row = oakRows[oakRow];
+        const next = Math.max(0, Math.min(row.length - 1, oakColumn + direction));
+        if (next === oakColumn) return;
+        oakColumn = next;
+        show(row[oakColumn]);
+        announce();
+      }
+      function returnHomeToOakBanner() {
+        view = 'home';
+        current = 0;
+        horizontalCurrent = 6;
+        show(heroImages[horizontalCurrent]);
+        announce();
+      }
+      function returnToOakMain() {
+        oakRow = 0;
+        oakColumn = 0;
+        show(oakRows[oakRow][oakColumn]);
+        announce();
+      }
+      function enterSnb() {
+        view = 'snb';
+        snbCurrent = 2;
+        snbDepth = 'one';
+        allMenuCurrent = 0;
+        movieDramaMenuCurrent = 0;
+        snbDetailCurrent = 0;
+        show(snbImages[snbCurrent]);
+        announce();
+      }
+      function enterAllMenu() {
+        snbDepth = 'all';
+        allMenuCurrent = 0;
+        show(allMenuImages[allMenuCurrent]);
+        announce();
+      }
+      function moveAllMenu(direction) {
+        const next = Math.max(0, Math.min(allMenuImages.length - 1, allMenuCurrent + direction));
+        if (next === allMenuCurrent) return;
+        allMenuCurrent = next;
+        show(allMenuImages[allMenuCurrent]);
+        announce();
+      }
+      function returnAllMenu() {
+        snbDepth = 'one';
+        snbCurrent = 1;
+        show(snbImages[snbCurrent]);
+        announce();
+      }
+      function enterMovieDramaMenu() {
+        snbDepth = 'movieDrama';
+        movieDramaMenuCurrent = 0;
+        show(movieDramaMenuImages[movieDramaMenuCurrent]);
+        announce();
+      }
+      function moveMovieDramaMenu(direction) {
+        const next = Math.max(0, Math.min(movieDramaMenuImages.length - 1, movieDramaMenuCurrent + direction));
+        if (next === movieDramaMenuCurrent) return;
+        movieDramaMenuCurrent = next;
+        show(movieDramaMenuImages[movieDramaMenuCurrent]);
+        announce();
+      }
+      function returnMovieDramaMenu() {
+        snbDepth = 'all';
+        allMenuCurrent = 0;
+        show(allMenuImages[allMenuCurrent]);
+        announce();
+      }
+      function enterSnbDetail() {
+        snbDetailCurrent = snbCurrent - 3;
+        snbDepth = 'detail';
+        show(snbDetailImages[snbDetailCurrent]);
+        announce();
+      }
+      function returnSnbDetail() {
+        snbDepth = 'one';
+        show(snbImages[snbCurrent]);
+        announce();
+      }
+      function moveSnbVertical(direction) {
+        const next = Math.max(0, Math.min(7, snbCurrent + direction));
+        if (next === snbCurrent) return;
+        snbCurrent = next;
+        show(snbImages[snbCurrent]);
+        announce();
+      }
+      function moveSnbHorizontal(direction) {
+        const next = direction > 0
+          ? Math.min(9, snbCurrent + 1)
+          : Math.max(7, snbCurrent - 1);
+        if (next === snbCurrent || (snbCurrent < 7)) return;
+        snbCurrent = next;
+        show(snbImages[snbCurrent]);
+        announce();
+      }
+      function returnHome() {
+        view = 'home';
+        current = 0;
+        horizontalCurrent = 0;
+        show(images[0]);
+        announce();
+      }
+      document.addEventListener('keydown', (event) => {
+        if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', 'Home', 'Backspace', 'Escape', 'BrowserBack', 'GoBack'].includes(event.key)) return;
+        event.preventDefault();
+        if (view === 'todayRecommendation') {
+          if (event.key === 'Escape') {
+            returnHomeToTodayRecommendationBanner();
+            return;
+          }
+          if (event.key === 'ArrowRight') moveTodayRecommendation(1);
+          if (event.key === 'ArrowLeft') moveTodayRecommendation(-1);
+          return;
+        }
+        if (view === 'oak') {
+          if (event.key === 'Escape') {
+            returnHomeToOakBanner();
+            return;
+          }
+          if (oakRow === 6 && (event.key === 'Enter' || event.key === 'Home')) {
+            returnToOakMain();
+            return;
+          }
+          if (event.key === 'ArrowLeft') {
+            if (oakColumn > 0) moveOakHorizontal(-1);
+            else returnHomeToOakBanner();
+            return;
+          }
+          if (event.key === 'ArrowDown') moveOakVertical(1);
+          if (event.key === 'ArrowUp') moveOakVertical(-1);
+          if (event.key === 'ArrowRight') moveOakHorizontal(1);
+          return;
+        }
+        if (view === 'bikwang') {
+          if (event.key === 'Escape') {
+            returnHomeToBikwangBanner();
+            return;
+          }
+          if (bikwangRow === 5 && (event.key === 'Enter' || event.key === 'Home')) {
+            returnToBikwangMain();
+            return;
+          }
+          if (event.key === 'ArrowLeft') {
+            if (bikwangColumn > 0) moveBikwangHorizontal(-1);
+            else returnHomeToBikwangBanner();
+            return;
+          }
+          if (event.key === 'ArrowDown') moveBikwangVertical(1);
+          if (event.key === 'ArrowUp') moveBikwangVertical(-1);
+          if (event.key === 'ArrowRight') moveBikwangHorizontal(1);
+          return;
+        }
+        if (view === 'spiderMan') {
+          if (event.key === 'Escape') {
+            returnHomeToSpiderManBanner();
+            return;
+          }
+          if (spiderManRow === 6 && (event.key === 'Enter' || event.key === 'Home')) {
+            returnToSpiderManMain();
+            return;
+          }
+          if (event.key === 'ArrowLeft') {
+            if (spiderManColumn > 0) moveSpiderManHorizontal(-1);
+            else returnHomeToSpiderManBanner();
+            return;
+          }
+          if (event.key === 'ArrowDown') moveSpiderManVertical(1);
+          if (event.key === 'ArrowUp') moveSpiderManVertical(-1);
+          if (event.key === 'ArrowRight') moveSpiderManHorizontal(1);
+          return;
+        }
+        if (view === 'okayMadamSeries') {
+          if (event.key === 'Escape') returnToOkayMadamSeriesBase();
+          if (event.key === 'ArrowDown') moveOkayMadamSeries(1);
+          if (event.key === 'ArrowUp') moveOkayMadamSeries(-1);
+          return;
+        }
+        if (view === 'okayMadam') {
+          if (event.key === 'Escape') {
+            returnHomeToOkayMadamBanner();
+            return;
+          }
+          if (okayMadamRow === 9 && (event.key === 'Enter' || event.key === 'Home')) {
+            returnToOkayMadamMain();
+            return;
+          }
+          if (okayMadamRow === 0 && event.key === 'Enter') {
+            enterOkayMadamSeries();
+            return;
+          }
+          if (event.key === 'ArrowLeft') {
+            if (okayMadamColumn > 0) moveOkayMadamHorizontal(-1);
+            else returnHomeToOkayMadamBanner();
+            return;
+          }
+          if (event.key === 'ArrowDown') moveOkayMadamVertical(1);
+          if (event.key === 'ArrowUp') moveOkayMadamVertical(-1);
+          if (event.key === 'ArrowRight') moveOkayMadamHorizontal(1);
+          return;
+        }
+        if (view === 'kian') {
+          if (event.key === 'Escape') returnHome();
+          return;
+        }
+        if (view === 'snb') {
+          if (snbDepth === 'all') {
+            if (allMenuCurrent === 0 && event.key === 'ArrowRight') {
+              enterMovieDramaMenu();
+              return;
+            }
+            if (event.key === 'ArrowLeft') returnAllMenu();
+            if (event.key === 'ArrowDown') moveAllMenu(1);
+            if (event.key === 'ArrowUp') moveAllMenu(-1);
+            return;
+          }
+          if (snbDepth === 'movieDrama') {
+            if (event.key === 'ArrowLeft') returnMovieDramaMenu();
+            if (event.key === 'ArrowDown') moveMovieDramaMenu(1);
+            if (event.key === 'ArrowUp') moveMovieDramaMenu(-1);
+            return;
+          }
+          if (snbDepth === 'detail') {
+            if (event.key === 'ArrowLeft') returnSnbDetail();
+            return;
+          }
+          if (snbCurrent === 1 && event.key === 'ArrowRight') {
+            enterAllMenu();
+            return;
+          }
+          if (snbCurrent === 2 && event.key === 'ArrowRight') {
+            returnHome();
+            return;
+          }
+          if (snbCurrent >= 3 && snbCurrent <= 6 && event.key === 'ArrowRight') {
+            enterSnbDetail();
+            return;
+          }
+          if (snbCurrent <= 7) {
+            if (event.key === 'ArrowDown') moveSnbVertical(1);
+            if (event.key === 'ArrowUp') moveSnbVertical(-1);
+          }
+          if (snbCurrent >= 7) {
+            if (event.key === 'ArrowRight') moveSnbHorizontal(1);
+            if (event.key === 'ArrowLeft') moveSnbHorizontal(-1);
+          }
+          return;
+        }
+        if (view === 'obsession') {
+          if (obsessionCurrent === 0 && event.key === 'ArrowLeft') {
+            view = 'home';
+            current = 0;
+            horizontalCurrent = 1;
+            show(heroImages[horizontalCurrent]);
+            announce();
+            return;
+          }
+          if (obsessionCurrent === 1 && obsessionPreviewCurrent > 0) {
+            if (event.key === 'ArrowLeft') moveObsessionPreview(-1);
+            return;
+          }
+          if (obsessionCurrent === 1 && event.key === 'ArrowRight') {
+            moveObsessionPreview(1);
+            return;
+          }
+          if (event.key === 'ArrowDown') moveObsession(1);
+          if (event.key === 'ArrowUp') moveObsession(-1);
+          if (event.key === 'Enter' && obsessionCurrent === obsessionImages.length - 1) {
+            obsessionCurrent = 0;
+            obsessionPreviewCurrent = 0;
+            show(obsessionImages[obsessionCurrent]);
+            announce();
+          }
+          return;
+        }
+        if (view === 'detail') {
+          const isPrevious = ['ArrowLeft', 'Backspace', 'Escape', 'BrowserBack', 'GoBack'].includes(event.key);
+          if (detailCurrent === 0 && detailBranch === 'favorite') {
+            if (moreActive) {
+              if (event.key === 'ArrowDown') returnToFavoriteBase();
+              return;
+            }
+            if (favoriteCurrent === 0 && event.key === 'ArrowUp') {
+              showMore();
+              return;
+            }
+            if (event.key === 'ArrowDown') {
+              returnToDetailBase();
+              return;
+            }
+            if (event.key === 'ArrowRight') {
+              moveFavorite(1);
+              return;
+            }
+            if (event.key === 'ArrowLeft') {
+              moveFavorite(-1);
+              return;
+            }
+            return;
+          }
+          if (detailCurrent === 0 && detailBranch !== 'base' && event.key === 'ArrowLeft') {
+            returnToDetailBase();
+            return;
+          }
+          if (detailCurrent === 0 && detailBranch === 'base' && isPrevious) {
+            returnHome();
+            return;
+          }
+          if (detailCurrent === 0 && detailBranch === 'base' && event.key === 'ArrowRight') {
+            showDetailBranch('right');
+            return;
+          }
+          if (detailCurrent === 0 && detailBranch === 'base' && event.key === 'ArrowUp') {
+            favoriteCurrent = 0;
+            moreActive = false;
+            showDetailBranch('favorite');
+            return;
+          }
+          if (detailCurrent === 2 && detailBranch === 'base' && event.key === 'ArrowRight') {
+            movePreview(1);
+            return;
+          }
+          if (detailCurrent === 2 && detailBranch === 'base' && previewCurrent > 0) {
+            if (event.key === 'ArrowLeft') movePreview(-1);
+            return;
+          }
+          if (detailCurrent === 3 && detailBranch === 'base' && event.key === 'ArrowRight') {
+            movePerson(1);
+            return;
+          }
+          if (detailCurrent === 3 && detailBranch === 'base' && personCurrent > 0) {
+            if (event.key === 'ArrowLeft') movePerson(-1);
+            return;
+          }
+          if (detailBranch !== 'base') return;
+          if (event.key === 'ArrowDown') moveDetail(1);
+          if (event.key === 'ArrowUp') moveDetail(-1);
+          if (event.key === 'Enter' && detailCurrent === detailImages.length - 1) {
+            detailCurrent = 0;
+            detailBranch = 'base';
+            favoriteCurrent = 0;
+            moreActive = false;
+            previewCurrent = 0;
+            personCurrent = 0;
+            show(detailImages[detailCurrent]);
+            announce();
+          }
+          return;
+        }
+        if (event.key === 'ArrowDown') move(1);
+        if (event.key === 'ArrowUp') move(-1);
+        if (event.key === 'ArrowRight') moveHero(1);
+        if (event.key === 'ArrowLeft' && horizontalCurrent === 0) {
+          enterSnb();
+          return;
+        }
+        if (event.key === 'ArrowLeft') moveHero(-1);
+        if (event.key === 'Enter' && current === 0 && horizontalCurrent === 0) enterDetail();
+        if (event.key === 'Enter' && current === 0 && horizontalCurrent === 1) enterObsession();
+        if (event.key === 'Enter' && current === 0 && horizontalCurrent === 2) enterOkayMadam();
+        if (event.key === 'Enter' && current === 0 && horizontalCurrent === 3) enterKian();
+        if (event.key === 'Enter' && current === 0 && horizontalCurrent === 4) enterSpiderMan();
+        if (event.key === 'Enter' && current === 0 && horizontalCurrent === 5) enterBikwang();
+        if (event.key === 'Enter' && current === 0 && horizontalCurrent === 6) enterOak();
+        if (event.key === 'Enter' && current === 0 && horizontalCurrent === 7) enterTodayRecommendation();
+      });
+      window.addEventListener('wheel', event => event.preventDefault(), { passive:false });
+      tv.focus();
+      announce();
+    })();
+  </script>
+</body>
+</html>
