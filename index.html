@@ -367,12 +367,16 @@ embeddedAssets["2-1-6_홈화면_메인메뉴_전체_아이들나라.png"] = "ass
       let horizontalCurrent = 0;
       let counterTimer;
       let shown;
+      const screenPool = [];
       function createScreen(asset, initial = false) {
         const image = new Image();
-        image.className = `screen${initial ? ' is-current' : ''}`;
-        image.src = embeddedAssets[asset];
+        image.className = 'screen';
+        image.dataset.asset = asset;
+        image.dataset.src = embeddedAssets[asset];
+        image.decoding = 'async';
         image.alt = 'U+tv 홈 화면';
         screens.append(image);
+        screenPool.push(image);
         return image;
       }
       const images = assets.map((asset, index) => createScreen(asset, index === 0));
@@ -586,7 +590,7 @@ embeddedAssets["8-7_오크_맨위로_1.png"] = "assets/images/asset_299.png";
         createScreen("9-1_오늘의추천_10.png")
       ];
       const horizontalImages = { 0: heroImages, 1: dramaImages, 2: continueImages, 3: movieImages, 4: netflixImages, 5: newReleaseImages, 6: entertainmentImages, 7: recommendationImages, 8: priceDropImages, 9: eventImages };
-      shown = images[0];
+
       let view = 'home';
       let detailCurrent = 0;
       let detailBranch = 'base';
@@ -611,12 +615,136 @@ embeddedAssets["8-7_오크_맨위로_1.png"] = "assets/images/asset_299.png";
       let oakRow = 0;
       let oakColumn = 0;
       let todayRecommendationCurrent = 0;
-      function show(image) {
-        if (shown === image) return;
-        shown.classList.remove('is-current');
-        image.classList.add('is-current');
-        shown = image;
+      // Load only the active screen and a small working set. Screen assets are unchanged.
+      const screenGroups = [images, heroImages, dramaImages, continueImages, movieImages, netflixImages, newReleaseImages, entertainmentImages, recommendationImages, priceDropImages, eventImages, detailImages, favoriteImages, previewImages, personImages, obsessionImages, obsessionPreviewImages, snbImages, allMenuImages, movieDramaMenuImages, snbDetailImages, okayMadamRows, okayMadamSeriesImages, spiderManRows, bikwangRows, oakRows, todayRecommendationImages, horizontalImages].flatMap(group =>
+        Array.isArray(group) ? (group.some(Array.isArray) ? group.filter(Array.isArray) : [group]) : Object.values(group));
+      const resident = new Map();
+      const pending = new Map();
+      const inputQueue = [];
+      const remoteKeys = new Set(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Enter','Home','Backspace','Escape','BrowserBack','GoBack']);
+      let ready = false, busy = false, requested, loadError = null, generation = 0;
+      let prefetchTimer, draining = false, replaying = false;
+      const api = window.IPTVTest = {
+        get ready() { return ready && !busy && !inputQueue.length && !draining; },
+        get state() { return {ready:this.ready, busy, asset:shown?.dataset.asset || null,
+          requested:requested?.dataset.asset || null, queued:inputQueue.length,
+          resident:resident.size, error:loadError}; },
+        whenReady(timeout=30000) {
+          return new Promise((resolve,reject) => {
+            const start=performance.now();
+            function poll() {
+              if (loadError) return reject(new Error(loadError));
+              if (api.ready) return resolve(api.state);
+              if (performance.now()-start > timeout) return reject(new Error('IPTV readiness timeout'));
+              setTimeout(poll,25);
+            }
+            poll();
+          });
+        },
+        retry() { if (requested && loadError) { pending.delete(requested); requested.removeAttribute('src'); show(requested); } }
+      };
+      function notify(type) {
+        tv.dataset.ready = String(api.ready);
+        tv.dataset.screen = shown?.dataset.asset || '';
+        tv.setAttribute('aria-busy',String(busy));
+        window.dispatchEvent(new CustomEvent(type,{detail:api.state}));
       }
+      function trim() {
+        for (const image of resident.keys()) {
+          if (resident.size<=6) break;
+          if (image===shown || image===requested || pending.has(image)) continue;
+          image.removeAttribute('src');
+          resident.delete(image);
+        }
+      }
+      function load(image) {
+        if (resident.has(image)) {
+          resident.delete(image); resident.set(image,true);
+          return Promise.resolve();
+        }
+        if (pending.has(image)) return pending.get(image);
+        const promise = new Promise((resolve,reject) => {
+          image.onload=resolve;
+          image.onerror=()=>reject(new Error('Image failed: '+image.dataset.asset));
+          image.src=image.dataset.src;
+          if (image.complete && image.naturalWidth) resolve();
+        }).then(async () => {
+          if (image.decode) await image.decode();
+          resident.set(image,true);
+        }).finally(() => {
+          image.onload=null; image.onerror=null; pending.delete(image); trim();
+        });
+        pending.set(image,promise);
+        return promise;
+      }
+      function neighbors(image) {
+        const result=[];
+        const homeRow=Object.values(horizontalImages).findIndex(row=>row.includes(image));
+        if (homeRow>=0) {
+          const row=horizontalImages[homeRow], col=row.indexOf(image);
+          result.push(row[col+1],row[col-1]);
+          for (const offset of [1,-1]) {
+            const next=horizontalImages[homeRow+offset];
+            if(next) result.push(next[Math.min(col,next.length-1)]);
+          }
+        } else {
+          for(const group of screenGroups) {
+            const i=group.indexOf(image);
+            if(i>=0) result.push(group[i+1],group[i-1]);
+          }
+        }
+        return [...new Set(result.filter(Boolean))].slice(0,4);
+      }
+      function schedulePrefetch(image, ticket) {
+        clearTimeout(prefetchTimer);
+        prefetchTimer=setTimeout(async () => {
+          for(const next of neighbors(image)) {
+            if(ticket!==generation || busy || inputQueue.length) break;
+            try { await load(next); } catch (_) { /* Navigation can retry a failed prefetch. */ }
+          }
+        },200);
+      }
+      async function show(image) {
+        if(shown===image && ready) return;
+        const ticket=++generation;
+        requested=image; ready=false; busy=true; loadError=null;
+        clearTimeout(prefetchTimer); notify('iptv:loading');
+        try {
+          await load(image);
+          if(ticket!==generation) return;
+          if(shown) shown.classList.remove('is-current');
+          image.classList.add('is-current'); shown=image;
+          // Publish readiness only after the decoded image has reached a paint opportunity.
+          await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+          if(ticket!==generation) return;
+          busy=false; ready=true; trim();
+          notify('iptv:ready'); drain(); schedulePrefetch(image,ticket);
+        } catch(error) {
+          if(ticket!==generation) return;
+          busy=false; ready=false; loadError=error.message;
+          notify('iptv:error');
+        }
+      }
+      function drain() {
+        if(draining || !ready || busy || !inputQueue.length) return;
+        draining=true;
+        requestAnimationFrame(() => {
+          draining=false;
+          if(!ready || busy) return;
+          const key=inputQueue.shift();
+          if(key) { replaying=true; try { document.dispatchEvent(new KeyboardEvent('keydown',{key,bubbles:true,cancelable:true})); } finally { replaying=false; } }
+          notify('iptv:state'); drain();
+        });
+      }
+      // Preserve discrete key presses during loading instead of dropping them.
+      document.addEventListener('keydown',event => {
+        if(replaying || !remoteKeys.has(event.key)) return;
+        if(!ready || busy || draining || inputQueue.length) {
+          event.preventDefault(); event.stopImmediatePropagation();
+          inputQueue.push(event.key); notify('iptv:state'); drain();
+        }
+      },true);
+
       function announce() {
         counter.value = view === 'detail'
           ? `${detailCurrent + 1} / ${detailImages.length}`
@@ -1290,6 +1418,7 @@ embeddedAssets["8-7_오크_맨위로_1.png"] = "assets/images/asset_299.png";
       });
       window.addEventListener('wheel', event => event.preventDefault(), { passive:false });
       tv.focus();
+      show(images[0]);
       announce();
     })();
   </script>
