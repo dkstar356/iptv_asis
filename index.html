@@ -1416,7 +1416,29 @@ embeddedAssets["8-7_오크_맨위로_1.png"] = "assets/images/asset_299.png";
         if (event.key === 'Enter' && current === 0 && horizontalCurrent === 6) enterOak();
         if (event.key === 'Enter' && current === 0 && horizontalCurrent === 7) enterTodayRecommendation();
       });
-      window.addEventListener('wheel', event => event.preventDefault(), { passive:false });
+      // Translate a vertical wheel gesture into one existing remote-key action.
+      let wheelTotal = 0, wheelDirection = 0, wheelLast = -Infinity, wheelStep = -Infinity;
+      window.addEventListener('wheel', event => {
+        if (event.ctrlKey || event.metaKey) return; // Preserve browser zoom gestures.
+        event.preventDefault();
+        if (!Number.isFinite(event.deltaY) || Math.abs(event.deltaY) <= Math.abs(event.deltaX || 0)) return;
+        const now = performance.now();
+        const direction = Math.sign(event.deltaY);
+        const elapsed = now - wheelLast;
+        wheelLast = now;
+        if (elapsed > 180 || direction !== wheelDirection) wheelTotal = 0;
+        wheelDirection = direction;
+        // Do not queue momentum while images or previous key presses are pending.
+        if (!api.ready || now - wheelStep < 350) { wheelTotal = 0; return; }
+        const pixels = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 1080 : 1);
+        wheelTotal += pixels;
+        if (Math.abs(wheelTotal) < 40) return;
+        wheelTotal = 0;
+        wheelStep = now;
+        document.dispatchEvent(new KeyboardEvent('keydown', {
+          key:direction > 0 ? 'ArrowDown' : 'ArrowUp', bubbles:true, cancelable:true
+        }));
+      }, { passive:false });
       tv.focus();
       show(images[0]);
       announce();
